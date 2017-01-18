@@ -9,16 +9,14 @@ from keras import optimizers
 from keras.models import Sequential
 from keras.utils.np_utils import to_categorical
 from keras.preprocessing.image import ImageDataGenerator
-from scipy.misc import imread
-
-
-
+from scipy.misc import imread, imresize
 
 """
 This script uses Keras API (https://keras.io), to train a deep neural network to predict steering angles from image
 dataset created by Udacity's Simulation environment. The deep neural net is based on NVIDIA's model, see link below:
 https://arxiv.org/pdf/1604.07316v1.pdf, which was capable of correctly predict steering angles.
 """
+
 
 def read_csv():
     # Reading Training Data
@@ -28,20 +26,32 @@ def read_csv():
     # classified for the Conv. Net.
 
     df_input_data = pd.read_csv(filepath_or_buffer=('data/driving_log.csv'),
-                             names=['center', 'left', 'right', 'steering', 'throttle', 'break', 'speed'])
+                                names=['center', 'left', 'right', 'steering', 'throttle', 'break', 'speed'])
 
     X_train = df_input_data.center.values
     y_train = df_input_data.steering.values.astype(np.float32)
 
-    return train_test_split(X_train, y_train)
+    # First split data into train and validation
+    X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train)
+
+    # Second, validation data is splitted into a smaller validation and test.
+    # This is done in order to not train on the data that will be evaluated at the end.
+    X_valid, X_test, y_valid, y_test = train_test_split(X_valid, y_valid)
+
+    return X_train, X_valid, X_test, y_train, y_valid, y_test
+
 
 def load_images(X_data):
+    image_h_target = 66
+    image_w_target = 200
 
-    X_out = np.ones(shape=(len(X_data), 160, 320, 3),dtype=np.int8)
+    X_out = np.ones(shape=(len(X_data), image_h_target, image_w_target, 3), dtype=np.int8)
 
-    for i,v in enumerate(X_data):
+    for i, v in enumerate(X_data):
         file_path = v.split('/')[-1]
-        im_data = imread(os.path.join('data/IMG',file_path))
+        im_data = imresize(imread(os.path.join('data/IMG', file_path)), size=(image_h_target, image_w_target, 3))
+        # resize images
+
         X_out[i][:] = im_data
 
     return X_out
@@ -49,7 +59,23 @@ def load_images(X_data):
 
 def export_model(model):
     from keras.utils.visualize_util import plot
+    from keras.models import model_from_json
+
+    # Plotting model architecture to png file
     plot(model, to_file='model.png')
+
+    # Model architecture to json
+    json_string = model.to_json()
+
+    with open('model.json', mode='wb') as file:
+        json.dump(json_string)
+        file.close()
+
+    # Model weights to file
+    model.save_weights('model.h5')
+
+    return 0
+
 
 def image_generator():
     # In order to handle large datasets which may not fit in memory, this example loads only a set of images
@@ -57,29 +83,33 @@ def image_generator():
 
     return 0
 
-def parse():
 
+def parse():
     parser = argparse.ArgumentParser(description='Behavioral Cloning')
     parser.add_argument("-b", "--batch_size", default=64, help='Batch Size')
-    parser.add_argument("-e", "--epoch_size", default=50, help="Number of epochs")
+    parser.add_argument("-e", "--epoch_size", default=1, help="Number of epochs")
     args = parser.parse_args()
     return args
 
 
 def main():
-
     args = parse()
 
     # Load or create pickle from training data to speed up script
-    if os.path.exists('train.p') and os.path.exists('valid.p'):
+    if os.path.exists('train.p') and os.path.exists('valid.p') and os.path.exists('test.p'):
+
         train_p = open('train.p', mode='rb')
         valid_p = open('valid.p', mode='rb')
+        test_p = open('test.p', mode='rb')
+
         X_train, y_train = pickle.load(train_p)
         X_valid, y_valid = pickle.load(valid_p)
+        X_test, y_test = pickle.load(test_p)
+
     else:
         # Read csv info
         print("---- Reading CSV Info ----")
-        X_train, X_valid, y_train, y_valid = read_csv()
+        X_train, X_valid, X_test, y_train, y_valid, y_test = read_csv()
 
         X_train = load_images(X_train)
         pickle.dump([X_train, y_train], open('train.p', mode='wb'))
@@ -87,14 +117,18 @@ def main():
         X_valid = load_images(X_valid)
         pickle.dump([X_valid, y_valid], open('valid.p', mode='wb'))
 
+        X_test = load_images(X_test)
+        pickle.dump([X_test, y_valid], open('test.p', mode='wb'))
 
-    print("Train/Validation Size: %d/%d" % (len(X_train),len(X_valid)))
+    print("Train/Validation/Test Size: %d/%d/%d" % (len(X_train), len(X_valid), len(X_test)))
 
     n_classes = len(np.unique(y_train))
 
     # One Hot Encoding
 
     y_train = to_categorical(y_train, n_classes)
+    y_valid = to_categorical(y_valid, n_classes)
+    y_test = to_categorical(y_test, n_classes)
 
     # ----- Keras Image Preprocessing -----
 
@@ -102,64 +136,64 @@ def main():
 
     # ----- Model definition -----
 
-    model_dict = {'in_shape':(66, 200, 3),  # For tensorflow backend use shape as (row, cols, chan)
-                  'nb_filter_1':24, 'nb_row_1':5, 'nb_col_1':5, 'stride_1':(2,2), 'z_1':'tanh','pad_1':'valid',
-                  'nb_filter_2':36, 'nb_row_2':5, 'nb_col_2':5, 'stride_2':(2,2), 'z_2':'tanh','pad_2':'valid',
-                  'nb_filter_3': 48, 'nb_row_3': 5, 'nb_col_3': 5, 'stride_3':(2,2), 'z_3':'tanh','pad_3':'valid',
-                  'nb_filter_4': 64, 'nb_row_4': 3, 'nb_col_4': 3, 'stride_4':(1,1), 'z_4':'tanh','pad_4':'valid',
-                  'nb_filter_5': 64, 'nb_row_5': 3, 'nb_col_5': 3, 'stride_5':(1,1), 'z_5':'tanh','pad_5':'valid',
+    model_dict = {'in_shape': (66, 200, 3),  # For tensorflow backend use shape as (row, cols, chan)
+                  'nb_filter_1': 24, 'nb_row_1': 5, 'nb_col_1': 5, 'stride_1': (2, 2), 'z_1': 'tanh', 'pad_1': 'valid',
+                  'nb_filter_2': 36, 'nb_row_2': 5, 'nb_col_2': 5, 'stride_2': (2, 2), 'z_2': 'tanh', 'pad_2': 'valid',
+                  'nb_filter_3': 48, 'nb_row_3': 5, 'nb_col_3': 5, 'stride_3': (2, 2), 'z_3': 'tanh', 'pad_3': 'valid',
+                  'nb_filter_4': 64, 'nb_row_4': 3, 'nb_col_4': 3, 'stride_4': (1, 1), 'z_4': 'tanh', 'pad_4': 'valid',
+                  'nb_filter_5': 64, 'nb_row_5': 3, 'nb_col_5': 3, 'stride_5': (1, 1), 'z_5': 'tanh', 'pad_5': 'valid',
                   'drop_p': 0.5}
 
     model = Sequential()
     # First Layer - 3@66x200 -> 24@31x98
     model.add(Convolution2D(nb_filter=model_dict['nb_filter_1'],
-                     nb_row=model_dict['nb_row_1'],
-                     nb_col=model_dict['nb_col_1'],
-                     activation=model_dict['z_1'],
-                     border_mode=model_dict['pad_1'],
-                     subsample=model_dict['stride_1'],
-                     init='glorot_normal',
-                     input_shape=model_dict['in_shape']))
+                            nb_row=model_dict['nb_row_1'],
+                            nb_col=model_dict['nb_col_1'],
+                            activation=model_dict['z_1'],
+                            border_mode=model_dict['pad_1'],
+                            subsample=model_dict['stride_1'],
+                            init='glorot_normal',
+                            input_shape=model_dict['in_shape']))
 
     model.add(Dropout(model_dict['drop_p']))
 
     # Second Layer - 24@31x98 -> 36@14x47
     model.add(Convolution2D(nb_filter=model_dict['nb_filter_2'],
-                     nb_row=model_dict['nb_row_2'],
-                     nb_col=model_dict['nb_col_2'],
-                     activation=model_dict['z_2'],
-                     border_mode=model_dict['pad_2'],
-                     subsample=model_dict['stride_2']))
+                            nb_row=model_dict['nb_row_2'],
+                            nb_col=model_dict['nb_col_2'],
+                            activation=model_dict['z_2'],
+                            border_mode=model_dict['pad_2'],
+                            subsample=model_dict['stride_2']))
 
     # Third Layer - 36@14x47 -> 48@5x22
     model.add(Convolution2D(nb_filter=model_dict['nb_filter_3'],
-                     nb_row=model_dict['nb_row_3'],
-                     nb_col=model_dict['nb_col_3'],
-                     activation=model_dict['z_3'],
-                     border_mode=model_dict['pad_3'],
-                     subsample=model_dict['stride_3']))
-    
+                            nb_row=model_dict['nb_row_3'],
+                            nb_col=model_dict['nb_col_3'],
+                            activation=model_dict['z_3'],
+                            border_mode=model_dict['pad_3'],
+                            subsample=model_dict['stride_3']))
+
     # Fourth Layer  - 48@5x22 -> 64@3x20
     model.add(Convolution2D(nb_filter=model_dict['nb_filter_4'],
-                     nb_row=model_dict['nb_row_4'],
-                     nb_col=model_dict['nb_col_4'],
-                     activation=model_dict['z_4'],
-                     border_mode=model_dict['pad_4'],
-                     subsample=model_dict['stride_4']))
-    
+                            nb_row=model_dict['nb_row_4'],
+                            nb_col=model_dict['nb_col_4'],
+                            activation=model_dict['z_4'],
+                            border_mode=model_dict['pad_4'],
+                            subsample=model_dict['stride_4']))
+
     # Fifth Layer
     model.add(Convolution2D(nb_filter=model_dict['nb_filter_5'],
-                     nb_row=model_dict['nb_row_5'],
-                     nb_col=model_dict['nb_col_5'],
-                     activation=model_dict['z_5'],
-                     border_mode=model_dict['pad_5'],
-                     subsample=model_dict['stride_5']))
+                            nb_row=model_dict['nb_row_5'],
+                            nb_col=model_dict['nb_col_5'],
+                            activation=model_dict['z_5'],
+                            border_mode=model_dict['pad_5'],
+                            subsample=model_dict['stride_5']))
 
     # Flat model - prepare for Dense Layers
     model.add(Flatten())
 
     # Sixth Layer - First Dense Layer (Fully Connected)
-    model.add(Dense(1164,activation='tanh'))
+    model.add(Dense(1164, activation='tanh'))
     # Dropout
     model.add(Dropout(model_dict['drop_p']))
     # Seventh Layer - First Dense Layer (Fully Connected)
@@ -172,12 +206,10 @@ def main():
     model.add(Dense(n_classes, activation='softmax'))
 
     # Optimizer
-    adam = optimizers.Adam() # Default Parameters
+    adam = optimizers.Adam()  # Default Parameters
     model.compile(loss='categorical_crossentropy',
-              optimizer=adam,
-              metrics=['accuracy'])
-
-    export_model(model)
+                  optimizer=adam,
+                  metrics=['accuracy'])
 
     datagen = ImageDataGenerator(
         featurewise_center=False,  # set input mean to 0 over the dataset
@@ -197,6 +229,9 @@ def main():
     score = model.evaluate(X_valid, y_valid, verbose=0)
     print('Test score:', score[0])
     print('Test accuracy:', score[1])
+
+    export_model(model)
+
 
 if __name__ == '__main__':
     main()
