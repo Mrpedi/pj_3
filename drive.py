@@ -7,6 +7,7 @@ import socketio
 import eventlet
 import eventlet.wsgi
 import time
+import cv2
 from PIL import Image
 from PIL import ImageOps
 from flask import Flask, render_template
@@ -14,6 +15,8 @@ from io import BytesIO
 
 from keras.models import model_from_json
 from keras.preprocessing.image import ImageDataGenerator, array_to_img, img_to_array
+from scipy.misc import imresize
+from keras.models import optimizers
 
 # Fix error with Keras and TensorFlow
 import tensorflow as tf
@@ -25,8 +28,25 @@ app = Flask(__name__)
 model = None
 prev_image_array = None
 
+
+def preprocess(image):
+    image_h_target = 66
+    image_w_target = 200
+
+    #im_data = imresize(image, size=(image_h_target, image_w_target, 3))
+    #im_data = cv2.cvtColor(im_data, cv2.COLOR_BGR2YUV)
+    # resize images
+    image = imresize(image, size=(image_h_target, image_w_target, 3))
+    image = image.astype(dtype='float32')
+    image -= np.mean(image, axis=0)
+    image /= np.std(image, axis=0)
+
+    return image
+
 @sio.on('telemetry')
 def telemetry(sid, data):
+
+
     # The current steering angle of the car
     steering_angle = data["steering_angle"]
     # The current throttle of the car
@@ -37,11 +57,12 @@ def telemetry(sid, data):
     imgString = data["image"]
     image = Image.open(BytesIO(base64.b64decode(imgString)))
     image_array = np.asarray(image)
+    image_array = preprocess(image_array)
     transformed_image_array = image_array[None, :, :, :]
     # This model currently assumes that the features of the model are just the images. Feel free to change this.
-    steering_angle = float(model.predict(transformed_image_array, batch_size=1))
+    steering_angle = (model.predict(transformed_image_array))[0][0]
     # The driving model currently just outputs a constant throttle. Feel free to edit this.
-    throttle = 0.2
+    throttle = 0.3
     print(steering_angle, throttle)
     send_control(steering_angle, throttle)
 
@@ -73,8 +94,8 @@ if __name__ == '__main__':
         # instead.
         model = model_from_json(jfile.read())
 
-
-    model.compile("adam", "mse")
+    adam = optimizers.adam(lr=0.0001)
+    model.compile(adam, "mse")
     weights_file = args.model.replace('json', 'h5')
     model.load_weights(weights_file)
 

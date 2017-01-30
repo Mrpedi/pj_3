@@ -7,6 +7,7 @@ Whether you decide to zip up your submission or submit a GitHub repo, please fol
 <b>model.py</b> - The script used to create and train the model.
 
 <b>drive.py</b> - The script to drive the car. You can feel free to resubmit the original drive.py or make modifications and submit your modified version.
+
 <b>model.json</b> - The model architecture.
 
 <b>model.h5</b> - The model weights.
